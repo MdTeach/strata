@@ -29,3 +29,5 @@ class CLBlockWitnessDataGenerationTest(testenv.StrataTester):
 
         ckp = seqrpc.strata_getCheckpointInfo(ckp_idx)
         assert ckp is not None
+
+        print(f"Current checkpoint: {ckp}")
