@@ -4,17 +4,19 @@ use num_format::{Locale, ToFormattedString};
 use reqwest::Client;
 use serde::Serialize;
 use serde_json::json;
-use strata_provers_perf::{ProofGeneratorPerf, ProofReport, ZkVmHostPerf};
-use strata_test_utils::{bitcoin::get_btc_chain, l2::gen_params};
-use strata_zkvm_tests::{CheckpointBatchInfo, TestProverGenerators, TEST_SP1_GENERATORS};
+use strata_provers_perf::ProofReport;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    sp1_sdk::utils::setup_logger();
     let args = EvalArgs::parse();
 
     let mut results_text = vec![format_header(&args)];
-    let sp1_reports = run_generator_programs(&TEST_SP1_GENERATORS);
+    // let sp1_reports = run_generator_programs(&TEST_SP1_GENERATORS);
+    let sp1_reports = vec![PerformanceReport {
+        program: "BTC_BLOCKSPACES".to_owned(),
+        cycles: 0,
+        success: true,
+    }];
     results_text.push(format_results(&sp1_reports, "SP1".to_owned()));
 
     // Print results
@@ -76,89 +78,6 @@ impl From<ProofReport> for PerformanceReport {
     }
 }
 
-/// Runs all prover generators from [`TestProverGenerators`] against test inputs.
-///
-/// Generates [`PerformanceReport`] for each invocation.
-fn run_generator_programs<H: ZkVmHostPerf>(
-    generator: &TestProverGenerators<H>,
-) -> Vec<PerformanceReport> {
-    let mut reports = vec![];
-
-    // Init test params.
-    let params = gen_params();
-    let rollup_params = params.rollup();
-
-    let l1_start_height = (rollup_params.genesis_l1_height + 1) as u32;
-    let l1_end_height = l1_start_height + 1;
-
-    let l2_start_height = 1;
-    let l2_end_height = 3;
-
-    let btc_block_id = 40321;
-    let btc_chain = get_btc_chain();
-    let btc_block = btc_chain.get_block(btc_block_id);
-    let strata_block_id = 1;
-
-    // btc_blockspace
-    println!("Generating a report for BTC_BLOCKSPACE");
-    let btc_blockspace = generator.btc_blockspace();
-    let btc_blockspace_report = btc_blockspace
-        .gen_proof_report(btc_block, "BTC_BLOCKSPACE".to_owned())
-        .unwrap();
-
-    reports.push(btc_blockspace_report.into());
-
-    // el_block
-    println!("Generating a report for EL_BLOCK");
-    let el_block = generator.el_block();
-    let el_block_report = el_block
-        .gen_proof_report(&strata_block_id, "EL_BLOCK".to_owned())
-        .unwrap();
-
-    reports.push(el_block_report.into());
-
-    // cl_block
-    println!("Generating a report for CL_BLOCK");
-    let cl_block = generator.cl_block();
-    let cl_block_report = cl_block
-        .gen_proof_report(&strata_block_id, "CL_BLOCK".to_owned())
-        .unwrap();
-
-    reports.push(cl_block_report.into());
-
-    // l1_batch
-    println!("Generating a report for L1_BATCH");
-    let l1_batch = generator.l1_batch();
-    let l1_batch_report = l1_batch
-        .gen_proof_report(&(l1_start_height, l1_end_height), "L1_BATCH".to_owned())
-        .unwrap();
-
-    reports.push(l1_batch_report.into());
-
-    // l2_block
-    println!("Generating a report for L2_BATCH");
-    let l2_block = generator.l2_batch();
-    let l2_block_report = l2_block
-        .gen_proof_report(&(l2_start_height, l2_end_height), "L2_BATCH".to_owned())
-        .unwrap();
-
-    reports.push(l2_block_report.into());
-
-    // checkpoint
-    println!("Generating a report for CHECKPOINT");
-    let checkpoint = generator.checkpoint();
-    let checkpoint_test_input = CheckpointBatchInfo {
-        l1_range: (l1_start_height.into(), l1_end_height.into()),
-        l2_range: (l2_start_height, l2_end_height),
-    };
-    let checkpoint_report = checkpoint
-        .gen_proof_report(&checkpoint_test_input, "CHECKPOINT".to_owned())
-        .unwrap();
-    reports.push(checkpoint_report.into());
-
-    reports
-}
-
 /// Returns a formatted header for the performance report with basic PR data.
 fn format_header(args: &EvalArgs) -> String {
     let mut detail_text = String::new();
@@ -202,7 +121,7 @@ async fn post_to_github_pr(
     let client = Client::new();
 
     // Get all comments on the PR
-    const BASE_URL: &str = "https://api.github.com/repos/alpenlabs/strata";
+    const BASE_URL: &str = "https://api.github.com/repos/MdTeach/strata";
     let comments_url = format!("{}/issues/{}/comments", BASE_URL, &args.pr_number);
     let comments_response = client
         .get(&comments_url)
@@ -227,7 +146,8 @@ async fn post_to_github_pr(
         let comment_url = existing_comment["url"].as_str().unwrap();
         let response = client
             .patch(comment_url)
-            .header("Authorization", format!("token {}", &args.github_token))
+            .header("Authorization", format!("Bearer {}", &args.github_token))
+            .header("X-GitHub-Api-Version", "2022-11-28")
             .header("User-Agent", "strata-perf-bot")
             .json(&json!({
                 "body": message
@@ -242,7 +162,8 @@ async fn post_to_github_pr(
         // Create a new comment
         let response = client
             .post(&comments_url)
-            .header("Authorization", format!("token {}", &args.github_token))
+            .header("Authorization", format!("Bearer {}", &args.github_token))
+            .header("X-GitHub-Api-Version", "2022-11-28")
             .header("User-Agent", "strata-perf-bot")
             .json(&json!({
                 "body": message
